@@ -47,14 +47,17 @@ queued=$(gh api "repos/$REPO/actions/runs?status=queued&per_page=50" --jq '.work
       --jq ".jobs[] | select(.status==\"queued\") | select(.labels | index(\"$LABEL\")) | .id"
   done | wc -l)
 
-# Droplets that are still booting/idle count against demand; we cannot see
-# which job they will take, so treat every live droplet as covering one.
+# A live droplet whose runner is busy is spoken for. Only droplets that are
+# still booting or listening can absorb a queued job, so demand is queued
+# jobs minus those. GitHub knows busy; DigitalOcean knows live.
 live=$(doctl compute droplet list --tag-name "$TAG" -o json | jq '[.[] | select(.status != "off")] | length')
-need=$(( queued - live ))
+busy=$(gh api "repos/$REPO/actions/runners?per_page=100" --jq "[.runners[] | select(.busy) | select(.labels[].name == \"$LABEL\")] | length")
+available=$(( live - busy )); (( available < 0 )) && available=0
+need=$(( queued - available ))
 (( need > 0 )) || exit 0
 room=$(( MAX_DROPLETS - live ))
 (( need > room )) && need=$room
-(( need > 0 )) || { log "at cap ($live/$MAX_DROPLETS) with $queued queued"; exit 0; }
+(( need > 0 )) || { log "at cap ($live/$MAX_DROPLETS, $busy busy) with $queued queued"; exit 0; }
 
 # --- create ----------------------------------------------------------------
 for _ in $(seq "$need"); do
