@@ -1,0 +1,54 @@
+#cloud-config
+# Ephemeral GitHub Actions runner for omarchy-pkgs package builds.
+#
+# Boots an Ubuntu droplet, installs docker and the runner, registers ONCE with
+# --ephemeral, runs exactly one job, then powers off. The controller (or the
+# reaper) deletes the powered-off droplet. Nothing here holds a long-lived
+# credential: the registration token is single-use and expires in an hour.
+#
+# Substitute before use:
+#   __REPO__            owner/name
+#   __RUNNER_TOKEN__    registration token (gh api -X POST repos/O/R/actions/runners/registration-token)
+#   __RUNNER_LABELS__   e.g. omarchy-builder
+#   __RUNNER_VERSION__  e.g. 2.329.0
+
+package_update: true
+packages:
+  - docker.io
+  - git
+  - curl
+  - jq
+  - rsync
+
+users:
+  - name: runner
+    groups: [docker]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+
+write_files:
+  - path: /home/runner/start.sh
+    permissions: "0755"
+    owner: runner:runner
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      cd /home/runner
+      mkdir -p actions-runner && cd actions-runner
+      arch=$(uname -m); [[ $arch == x86_64 ]] && arch=x64
+      curl -fsSL -o runner.tgz \
+        "https://github.com/actions/runner/releases/download/v__RUNNER_VERSION__/actions-runner-linux-${arch}-__RUNNER_VERSION__.tar.gz"
+      tar xzf runner.tgz && rm runner.tgz
+      ./config.sh --unattended --ephemeral \
+        --url "https://github.com/__REPO__" \
+        --token "__RUNNER_TOKEN__" \
+        --name "do-$(hostname)" \
+        --labels "__RUNNER_LABELS__" \
+        --replace
+      ./run.sh
+      # One job done. Power off; the controller deletes powered-off droplets.
+      sudo poweroff
+
+runcmd:
+  - systemctl enable --now docker
+  - sudo -u runner /home/runner/start.sh > /home/runner/runner.log 2>&1

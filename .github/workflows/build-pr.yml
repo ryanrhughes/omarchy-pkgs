@@ -1,0 +1,72 @@
+name: Build changed packages
+
+# Spike: build every package directory a PR touches, one job per package, on
+# the self-hosted droplet pool. Artifacts are unsigned and are not published.
+#
+# NOT yet enforced here (required before this runs on the real repo):
+#   - tooling from base: checkout master's bin/helpers/build and overlay only
+#     the PR's pkgbuilds/<name> directories
+#   - fork approval setting on the repository
+
+on:
+  pull_request:
+    paths:
+      - "pkgbuilds/**"
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: "Space-separated package directories to build"
+        required: true
+
+concurrency:
+  group: build-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.list.outputs.packages }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: list
+        run: |
+          if [[ -n "${{ github.event.inputs.packages }}" ]]; then
+            names="${{ github.event.inputs.packages }}"
+          else
+            names=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" -- pkgbuilds \
+              | awk -F/ '$1=="pkgbuilds" && NF>2 {print $2}' | sort -u)
+          fi
+          existing=""
+          for n in $names; do [[ -d "pkgbuilds/$n" ]] && existing="$existing $n"; done
+          echo "packages=$(printf '%s\n' $existing | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
+          echo "Packages: $existing"
+
+  build:
+    needs: changes
+    if: needs.changes.outputs.packages != '[]'
+    runs-on: [self-hosted, omarchy-builder]
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJson(needs.changes.outputs.packages) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build ${{ matrix.package }}
+        env:
+          CONTAINER_ENGINE: docker
+        run: bin/build --package ${{ matrix.package }}
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.package }}-edge-x86_64
+          path: build-output/edge/x86_64/*.pkg.tar.zst
+          if-no-files-found: error
+          retention-days: 7
