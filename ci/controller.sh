@@ -21,6 +21,8 @@ MAX_DROPLETS=${MAX_DROPLETS:-4}
 MAX_AGE_MINUTES=${MAX_AGE_MINUTES:-200}
 RUNNER_VERSION=${RUNNER_VERSION:-2.337.0}
 CLOUD_INIT=${CLOUD_INIT:-$(dirname "$0")/runner-cloud-init.yaml}
+# Optional, for debugging a runner that never registers: DO ssh key id(s).
+SSH_KEYS=${SSH_KEYS:-}
 LOCK=/tmp/omarchy-controller.lock
 
 exec 9>"$LOCK"; flock -n 9 || exit 0
@@ -67,5 +69,6 @@ for _ in $(seq "$need"); do
   name="$TAG-$(date +%s)-$RANDOM"
   log "creating $name ($SIZE) for $queued queued job(s)"
   doctl compute droplet create "$name" --region "$REGION" --size "$SIZE" --image "$IMAGE" \
-    --tag-name "$TAG" --user-data "$userdata" --wait --format ID,Name --no-header
+    --tag-name "$TAG" ${SSH_KEYS:+--ssh-keys "$SSH_KEYS"} \
+    --user-data "$userdata" --wait --format ID,Name --no-header
 done
