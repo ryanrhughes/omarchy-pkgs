@@ -15,6 +15,7 @@
 package_update: true
 packages:
   - docker.io
+  - docker-buildx
   - git
   - curl
   - jq
