@@ -29,7 +29,9 @@ log() { echo "$(date '+%F %T') $*"; }
 
 # --- reap ------------------------------------------------------------------
 now=$(date +%s)
-doctl compute droplet list --tag-name "$TAG" --format ID,Status,Created --no-header |
+# JSON, not --format: the Created column renders as <nil> in table output.
+doctl compute droplet list --tag-name "$TAG" -o json |
+  jq -r '.[] | "\(.id) \(.status) \(.created_at)"' |
 while read -r id status created; do
   age=$(( (now - $(date -d "$created" +%s)) / 60 ))
   if [[ $status == off ]] || (( age > MAX_AGE_MINUTES )); then
@@ -47,7 +49,7 @@ queued=$(gh api "repos/$REPO/actions/runs?status=queued&per_page=50" --jq '.work
 
 # Droplets that are still booting/idle count against demand; we cannot see
 # which job they will take, so treat every live droplet as covering one.
-live=$(doctl compute droplet list --tag-name "$TAG" --format Status --no-header | grep -c -v '^off$' || true)
+live=$(doctl compute droplet list --tag-name "$TAG" -o json | jq '[.[] | select(.status != "off")] | length')
 need=$(( queued - live ))
 (( need > 0 )) || exit 0
 room=$(( MAX_DROPLETS - live ))
