@@ -58,7 +58,7 @@ room=$(( MAX_DROPLETS - live ))
 for _ in $(seq "$need"); do
   token=$(gh api -X POST "repos/$REPO/actions/runners/registration-token" --jq .token)
   userdata=$(sed -e "s|__REPO__|$REPO|" -e "s|__RUNNER_TOKEN__|$token|" \
-                 -e "s|__RUNNER_LABELS__|$LABEL|" -e "s|__RUNNER_VERSION__|$RUNNER_VERSION|" "$CLOUD_INIT")
+                 -e "s|__RUNNER_LABELS__|$LABEL|" -e "s|__RUNNER_VERSION__|$RUNNER_VERSION|g" "$CLOUD_INIT")
   name="$TAG-$(date +%s)-$RANDOM"
   log "creating $name ($SIZE) for $queued queued job(s)"
   doctl compute droplet create "$name" --region "$REGION" --size "$SIZE" --image "$IMAGE" \
