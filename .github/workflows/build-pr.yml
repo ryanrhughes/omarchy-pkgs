@@ -5,8 +5,8 @@ name: Build changed packages
 #
 # NOT yet enforced here (required before this runs on the real repo):
 #   - tooling from base: checkout master's bin/helpers/build and overlay only
-#     the PR's pkgbuilds/<name> directories
-#   - fork approval setting on the repository
+#     the PR's pkgbuilds/<name> directories. The vouch gate limits who can
+#     change tooling in a PR, not what a trusted author's PR can run.
 
 # No paths filter: `result` is the required status check, so it has to be
 # reported on every PR. A PR that touches no package directory gets an empty
@@ -74,6 +74,8 @@ jobs:
         run: |
           case "$STATUS" in
             bot|collaborator|vouched|dispatch) trusted=true ;;
+            # A denouncement is absolute: the label cannot override it.
+            denounced) trusted=false ;;
             *) trusted=$APPROVED ;;
           esac
           echo "trusted=$trusted" >> "$GITHUB_OUTPUT"
@@ -82,8 +84,12 @@ jobs:
             echo "Author $AUTHOR is trusted ($STATUS); building $PLANNED package(s)."
           else
             echo "count=0" >> "$GITHUB_OUTPUT"
-            echo "::warning::Author $AUTHOR is not vouched ($STATUS). $PLANNED package build(s) planned but not run."
-            echo "::warning::A maintainer can add the author to .github/VOUCHED.td, or apply the 'build-approved' label to build this PR."
+            echo "::warning::Author $AUTHOR is not trusted ($STATUS). $PLANNED package build(s) planned but not run."
+            if [[ $STATUS == denounced ]]; then
+              echo "::warning::The author is denounced in .github/VOUCHED.td; the build-approved label does not apply."
+            else
+              echo "::warning::A maintainer can add the author to .github/VOUCHED.td, or apply the 'build-approved' label to build this PR."
+            fi
           fi
 
   build:
