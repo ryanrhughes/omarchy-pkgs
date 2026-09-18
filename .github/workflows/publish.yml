@@ -61,9 +61,13 @@ jobs:
     environment: publish
     timeout-minutes: 240
     strategy:
-      # Jobs are per package per architecture, so two jobs never write the
-      # same channel database at once.
-      max-parallel: 4
+      # One job at a time. Each job pulls a channel database, adds its
+      # package, and uploads the whole file back; two jobs publishing into
+      # the same channel concurrently would each overwrite the other's entry
+      # (seen: a three-package merge lost two entries). Builds already ran
+      # on the PR, so serial publishing costs a minute per package, not a
+      # build.
+      max-parallel: 1
       fail-fast: false
       matrix: ${{ fromJson(needs.changes.outputs.matrix) }}
     steps:
