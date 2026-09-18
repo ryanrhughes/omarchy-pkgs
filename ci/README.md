@@ -47,14 +47,31 @@ Watch it with `journalctl -u omarchy-controller -f` on the box.
 ## Not done (required before this touches the real repo)
 
 - Tooling from base: check out master's `bin/ helpers/ build/` and overlay
-  only the PR's `pkgbuilds/<name>`; today a PR can edit the build script.
-- "Require approval for all outside collaborators" on the repository.
+  only the PR's `pkgbuilds/<name>`; today a PR can edit the build script
+  and it runs on the droplet. The vouch gate limits who can do that, not
+  what they can do.
 - DigitalOcean cloud firewall on the `omarchy-builder` tag: no inbound, no
   egress to private ranges or the metadata address.
-- Controller as a systemd timer with its own credentials on a dedicated
-  droplet; concurrency cap tuned; reaper as a separate cron.
-- Multi-channel matrix for fast-ring packages, aarch64 (no DO arm64; QEMU or
-  an external arm box), and artifact reuse on merge.
+- A fine-grained GitHub token for the real repository (the one on the
+  controller box is scoped to the fork), and the publish environment's
+  secrets set there.
+- Disable the host's auto-release timers for any channel CI publishes to,
+  so two writers never touch one database.
+
+## Done since the spike README was first written
+
+- Controller as a systemd timer on its own droplet, plain curl, self-test.
+- Build once against edge; one artifact per package per architecture,
+  published into every channel it belongs to (fast ring: all three at
+  once). arch=any builds once for every architecture database.
+- Publish is incremental and immutable: pull the channel db, refuse
+  different bytes under an existing name, accept identical bytes, upload
+  packages then signatures then the db.
+- aarch64 under QEMU with credential-preserving binfmt.
+- Vouch gate: collaborators, `.github/VOUCHED.td`, or the `build-approved`
+  label; denounced authors cannot be overridden by the label.
+- Tests run on PRs only; `result`, `self-tests`, `build-isolation` are the
+  required checks with strict up-to-date branches.
 
 ## Cleanup
 
