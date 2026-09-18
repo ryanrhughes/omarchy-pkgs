@@ -24,6 +24,10 @@ CLOUD_INIT=${CLOUD_INIT:-$(dirname "$0")/runner-cloud-init.yaml}
 # Optional, for debugging a runner that never registers: DO ssh key id(s).
 SSH_KEYS=${SSH_KEYS:-}
 LOCK=/tmp/omarchy-controller.lock
+# Refuse to run against whichever doctl context happens to be current: the
+# droplets bill to that account. Name the context explicitly.
+DOCTL_CONTEXT=${DOCTL_CONTEXT:?name the doctl auth context for the omarchy account}
+doctl() { command doctl --context "$DOCTL_CONTEXT" "$@"; }
 
 exec 9>"$LOCK"; flock -n 9 || exit 0
 
