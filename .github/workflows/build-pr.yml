@@ -26,12 +26,17 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     outputs:
-      packages: ${{ steps.list.outputs.packages }}
+      matrix: ${{ steps.list.outputs.matrix }}
+      count: ${{ steps.list.outputs.count }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
+      # One matrix entry per package per channel it is eligible for, decided
+      # by the same metadata rules the release host uses. A fast-ring package
+      # therefore builds three times, once against each channel's Arch
+      # snapshot, and ships to all three on merge.
       - id: list
         run: |
           if [[ -n "${{ github.event.inputs.packages }}" ]]; then
@@ -40,34 +45,39 @@ jobs:
             names=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" -- pkgbuilds \
               | awk -F/ '$1=="pkgbuilds" && NF>2 {print $2}' | sort -u)
           fi
-          existing=""
-          for n in $names; do [[ -d "pkgbuilds/$n" ]] && existing="$existing $n"; done
-          echo "packages=$(printf '%s\n' $existing | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
-          echo "Packages: $existing"
+          matrix=$(printf '%s\n' $names | bin/build-matrix)
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "count=$(jq '.include | length' <<<"$matrix")" >> "$GITHUB_OUTPUT"
+          jq -r '.include[] | "\(.package) -> \(.mirror)/\(.arch)"' <<<"$matrix"
 
   build:
     needs: changes
-    if: needs.changes.outputs.packages != '[]'
+    if: needs.changes.outputs.count != '0'
     runs-on: [self-hosted, omarchy-builder]
     timeout-minutes: 180
     strategy:
       fail-fast: false
-      matrix:
-        package: ${{ fromJson(needs.changes.outputs.packages) }}
+      matrix: ${{ fromJson(needs.changes.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Build ${{ matrix.package }}
+      - name: Build ${{ matrix.package }} for ${{ matrix.mirror }}
         env:
           CONTAINER_ENGINE: docker
-        run: bin/build --package ${{ matrix.package }}
+        run: bin/build --mirror ${{ matrix.mirror }} --arch ${{ matrix.arch }} --package ${{ matrix.package }}
+      # The artifact label carries the package directory's git tree hash so
+      # the publish step can find the build for exactly the tree that merged.
+      # The package file inside keeps makepkg's standard name untouched.
+      - name: Tree hash
+        id: tree
+        run: echo "hash=$(git rev-parse HEAD:pkgbuilds/${{ matrix.package }})" >> "$GITHUB_OUTPUT"
       - name: Upload artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.package }}-edge-x86_64
-          path: build-output/edge/x86_64/*.pkg.tar.zst
+          name: ${{ matrix.package }}-${{ matrix.mirror }}-${{ matrix.arch }}-${{ steps.tree.outputs.hash }}
+          path: build-output/${{ matrix.mirror }}/${{ matrix.arch }}/*.pkg.tar.zst
           if-no-files-found: error
           retention-days: 7
 

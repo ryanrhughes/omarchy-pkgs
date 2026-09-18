@@ -1,0 +1,49 @@
+#!/bin/bash
+# Self-test for bin/publish-artifact against a local directory as the remote.
+# Needs repo-add, gpg, rclone, bsdtar (run in the Arch builder/test container).
+set -euo pipefail
+ROOT=$(realpath "${BASH_SOURCE[0]%/*}/..")
+T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+REMOTE="$T/r2"; mkdir -p "$REMOTE"
+
+# throwaway signing key
+export GNUPGHOME="$T/g"; mkdir -m700 "$GNUPGHOME"
+gpg --batch --quiet --passphrase '' --quick-gen-key 'Test <t@t>' ed25519 sign 0 2>/dev/null
+export GPG_PRIVATE_KEY=$(gpg --batch --armor --export-secret-keys 'Test <t@t>') GPG_PASSPHRASE=''
+unset GNUPGHOME
+
+# minimal real packages via makepkg
+mkpkg() { # mkpkg <name> <pkgrel> <arch>
+  local d="$T/src/$1-$2"; mkdir -p "$d"; cd "$d"
+  printf 'pkgname=%s\npkgver=1.0\npkgrel=%s\narch=(%s)\npackage(){ install -Dm644 /dev/null "$pkgdir/usr/share/%s-%s"; }\n' "$1" "$2" "$3" "$1" "$2" > PKGBUILD
+  # CARCH so the PKGINFO records the requested arch (--ignorearch would
+  # stamp the host's).
+  CARCH=$3 makepkg -f --nodeps --ignorearch >/dev/null 2>&1; ls "$d"/*.pkg.tar.zst
+}
+A1=$(mkpkg alpha 1 any); A2=$(mkpkg alpha 2 any); B1=$(mkpkg beta 1 x86_64); C1=$(mkpkg gamma 1 aarch64)
+
+pub() { "$ROOT/bin/publish-artifact" --remote "$REMOTE" --mirror edge --arch x86_64 "$@" >"$T/out" 2>&1; }
+entries() { tar -tf "$REMOTE/edge/x86_64/omarchy.db.tar.zst" | grep '/$' | sort | tr '\n' ' '; }
+pass() { echo "PASS: $1"; }
+fail() { echo "FAIL: $1"; cat "$T/out"; exit 1; }
+
+pub "$A1" && [[ "$(entries)" == "alpha-1.0-1/ " ]] && [[ -f "$REMOTE/edge/x86_64/$(basename "$A1").sig" ]] \
+  && pass "first publish creates db with one entry and a signature" || fail "first publish"
+
+sum_before=$(sha256sum "$REMOTE/edge/x86_64/$(basename "$A1")")
+pub "$B1" && [[ "$(entries)" == "alpha-1.0-1/ beta-1.0-1/ " ]] && [[ "$(sha256sum "$REMOTE/edge/x86_64/$(basename "$A1")")" == "$sum_before" ]] \
+  && pass "second package added incrementally; first file untouched" || fail "incremental add"
+
+pub "$A2" && [[ "$(entries)" == "alpha-1.0-2/ beta-1.0-1/ " ]] && [[ -f "$REMOTE/edge/x86_64/$(basename "$A1")" ]] \
+  && pass "new pkgrel replaces the db entry, old file remains on remote" || fail "replace entry"
+
+if pub "$A2"; then fail "republishing same filename should refuse"; else grep -q 'refusing to overwrite' "$T/out" && pass "same filename refused" || fail "wrong refusal reason"; fi
+
+if pub "$C1"; then fail "aarch64 package into x86_64 should refuse"; else grep -q 'publishing to x86_64' "$T/out" && pass "wrong-arch package refused" || fail "wrong-arch reason"; fi
+
+cp "$B1" "$T/renamed-1.0-1-x86_64.pkg.tar.zst"
+if pub "$T/renamed-1.0-1-x86_64.pkg.tar.zst"; then fail "filename/PKGINFO mismatch should refuse"; else grep -q 'does not match PKGINFO' "$T/out" && pass "filename must match PKGINFO" || fail "mismatch reason"; fi
+
+# db must verify: pacman can read it and each package's signature checks
+gpg --batch --quiet --import <<<"$GPG_PRIVATE_KEY" 2>/dev/null || true
+( cd "$REMOTE/edge/x86_64" && for f in *.pkg.tar.zst; do gpg --batch --quiet --verify "$f.sig" "$f" 2>/dev/null || { echo "FAIL: signature $f"; exit 1; }; done ) && pass "all signatures verify"
