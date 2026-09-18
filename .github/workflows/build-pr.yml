@@ -13,6 +13,7 @@ name: Build changed packages
 # matrix and a passing result in seconds.
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
     inputs:
       packages:
@@ -24,16 +25,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Builds cost real machines, so they run only for trusted authors:
+  # collaborators, anyone in .github/VOUCHED.td (read from the default
+  # branch, so a PR cannot vouch for itself), or a PR a maintainer has
+  # labelled "build-approved". Everyone else gets this job's plan output
+  # and a passing `result`, which is enough for a maintainer to review
+  # before deciding to spend the compute.
   changes:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.list.outputs.matrix }}
-      count: ${{ steps.list.outputs.count }}
+      count: ${{ steps.gate.outputs.count }}
+      trusted: ${{ steps.gate.outputs.trusted }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
+      - id: vouch
+        if: github.event_name == 'pull_request'
+        uses: mitchellh/vouch/action/check-user@f23dbb5e745334f97414ec70463ce7301071a661 # v1
+        with:
+          user: ${{ github.event.pull_request.user.login }}
+          allow-fail: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # One matrix entry per package per architecture. Every package builds
       # once, against edge; the channels it ships to on merge are carried
       # along for information. A filename means one set of bytes.
@@ -47,8 +63,28 @@ jobs:
           fi
           matrix=$(printf '%s\n' $names | bin/build-matrix)
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
-          echo "count=$(jq '.include | length' <<<"$matrix")" >> "$GITHUB_OUTPUT"
+          echo "planned=$(jq '.include | length' <<<"$matrix")" >> "$GITHUB_OUTPUT"
           jq -r '.include[] | "\(.package) \(.arch) -> \(.channels)"' <<<"$matrix"
+      - id: gate
+        env:
+          STATUS: ${{ steps.vouch.outputs.status || 'dispatch' }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'build-approved') }}
+          PLANNED: ${{ steps.list.outputs.planned }}
+        run: |
+          case "$STATUS" in
+            bot|collaborator|vouched|dispatch) trusted=true ;;
+            *) trusted=$APPROVED ;;
+          esac
+          echo "trusted=$trusted" >> "$GITHUB_OUTPUT"
+          if [[ $trusted == true ]]; then
+            echo "count=$PLANNED" >> "$GITHUB_OUTPUT"
+            echo "Author $AUTHOR is trusted ($STATUS); building $PLANNED package(s)."
+          else
+            echo "count=0" >> "$GITHUB_OUTPUT"
+            echo "::warning::Author $AUTHOR is not vouched ($STATUS). $PLANNED package build(s) planned but not run."
+            echo "::warning::A maintainer can add the author to .github/VOUCHED.td, or apply the 'build-approved' label to build this PR."
+          fi
 
   build:
     needs: changes
@@ -91,5 +127,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: |
-          echo "build result: ${{ needs.build.result }}"
+          echo "trusted=${{ needs.changes.outputs.trusted }} build=${{ needs.build.result }}"
+          # An untrusted author's PR is held, not failed: the required check
+          # stays pending until a maintainer vouches or labels it.
+          if [[ "${{ needs.changes.outputs.trusted }}" != "true" ]]; then
+            echo "::error::Builds were not run: author is not vouched. Add to .github/VOUCHED.td or apply the 'build-approved' label."
+            exit 1
+          fi
           [[ "${{ needs.build.result }}" == "success" || "${{ needs.build.result }}" == "skipped" ]]
