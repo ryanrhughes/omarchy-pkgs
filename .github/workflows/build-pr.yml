@@ -34,10 +34,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      # One matrix entry per package per channel it is eligible for, decided
-      # by the same metadata rules the release host uses. A fast-ring package
-      # therefore builds three times, once against each channel's Arch
-      # snapshot, and ships to all three on merge.
+      # One matrix entry per package per architecture. Every package builds
+      # once, against edge; the channels it ships to on merge are carried
+      # along for information. A filename means one set of bytes.
       - id: list
         run: |
           if [[ -n "${{ github.event.inputs.packages }}" ]]; then
@@ -49,7 +48,7 @@ jobs:
           matrix=$(printf '%s\n' $names | bin/build-matrix)
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
           echo "count=$(jq '.include | length' <<<"$matrix")" >> "$GITHUB_OUTPUT"
-          jq -r '.include[] | "\(.package) -> \(.mirror)/\(.arch)"' <<<"$matrix"
+          jq -r '.include[] | "\(.package) \(.arch) -> \(.channels)"' <<<"$matrix"
 
   build:
     needs: changes
@@ -63,10 +62,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Build ${{ matrix.package }} for ${{ matrix.mirror }}
+      - name: Build ${{ matrix.package }} (${{ matrix.arch }}, ships to ${{ matrix.channels }})
         env:
           CONTAINER_ENGINE: docker
-        run: bin/build --mirror ${{ matrix.mirror }} --arch ${{ matrix.arch }} --package ${{ matrix.package }}
+        run: bin/build --mirror edge --arch ${{ matrix.arch }} --package ${{ matrix.package }}
       # The artifact label carries the package directory's git tree hash so
       # the publish step can find the build for exactly the tree that merged.
       # The package file inside keeps makepkg's standard name untouched.
@@ -77,8 +76,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.package }}-${{ matrix.mirror }}-${{ matrix.arch }}-${{ steps.tree.outputs.hash }}
-          path: build-output/${{ matrix.mirror }}/${{ matrix.arch }}/*.pkg.tar.zst
+          name: ${{ matrix.package }}-${{ matrix.arch }}-${{ steps.tree.outputs.hash }}
+          path: build-output/edge/${{ matrix.arch }}/*.pkg.tar.zst
           if-no-files-found: error
           retention-days: 7
 
