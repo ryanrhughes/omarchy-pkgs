@@ -18,7 +18,15 @@ mkpkg() { # mkpkg <name> <pkgrel> <arch>
   printf 'pkgname=%s\npkgver=1.0\npkgrel=%s\narch=(%s)\npackage(){ install -Dm644 /dev/null "$pkgdir/usr/share/%s-%s"; }\n' "$1" "$2" "$3" "$1" "$2" > PKGBUILD
   # CARCH so the PKGINFO records the requested arch (--ignorearch would
   # stamp the host's).
-  CARCH=$3 makepkg -f --nodeps --ignorearch >/dev/null 2>&1; ls "$d"/*.pkg.tar.zst
+  # makepkg refuses to run as root (the CI test container does); build the
+  # fixture as an unprivileged user in that case.
+  if (( EUID == 0 )); then
+    id -u fixture >/dev/null 2>&1 || useradd -m fixture
+    chown -R fixture "$d"; runuser -u fixture -- env CARCH=$3 makepkg -f --nodeps --ignorearch >/dev/null 2>&1
+  else
+    CARCH=$3 makepkg -f --nodeps --ignorearch >/dev/null 2>&1
+  fi
+  ls "$d"/*.pkg.tar.zst
 }
 A1=$(mkpkg alpha 1 any); A2=$(mkpkg alpha 2 any); B1=$(mkpkg beta 1 x86_64); C1=$(mkpkg gamma 1 aarch64)
 
