@@ -129,6 +129,7 @@ RUN pacman -Syu --noconfirm && \
         wget \
         curl \
         jq \
+        rclone \
         gnupg && \
     pacman -Scc --noconfirm && \
     rm -rf /var/cache/pacman/pkg/*
