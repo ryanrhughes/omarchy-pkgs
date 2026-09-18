@@ -22,8 +22,11 @@ signing on merge exactly as before.
   plans against and resolves from `https://pkgs.omarchy.org/<mirror>/<arch>`.
 - Droplet create → runner registered: ~70 s. omarchy-fish PR job: 2 min
   including the builder image build. Droplet powers off after the job.
+- linux-omarchy on a c-32 droplet: 30 min wall clock for the build job
+  (23:39 → 00:09), 254 MB artifact. Cold start ~90 s before the job began.
 - A PR whose PKGBUILD fails to build turns the required check red and GitHub
-  refuses the merge.
+  refuses the merge (`mergeStateStatus=BLOCKED`, `gh pr merge` refuses
+  without `--admin`).
 - Controller: one queued job + one busy droplet ⇒ creates exactly one more;
   reaps powered-off droplets on the next tick.
 
