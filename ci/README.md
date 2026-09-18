@@ -11,7 +11,7 @@ signing on merge exactly as before.
 - `runner-cloud-init.yaml` — Ubuntu 24.04 user-data: docker + buildx, the
   GitHub runner registered `--ephemeral`, runs one job, powers off.
 - `controller.sh` — systemd timer every minute on a small always-on droplet.
-  Polls for queued jobs with our label, creates one c-32 droplet per job up
+  Polls for queued jobs with our label, creates one g5-32vcpu-64gb-50gb droplet (ric1) per job up
   to `MAX_DROPLETS`, deletes droplets that are powered off or older than
   `MAX_AGE_MINUTES`. No inbound endpoint. Plain curl against both APIs, no
   doctl and no gh: a token in the environment cannot pick the wrong account

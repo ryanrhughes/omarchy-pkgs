@@ -23,6 +23,9 @@ package_update: true
 packages:
   - docker.io
   - docker-buildx
+  # aarch64 builds run under user-mode emulation: DO has no arm droplets.
+  - qemu-user-static
+  - binfmt-support
   - git
   - curl
   - jq
