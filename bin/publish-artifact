@@ -67,10 +67,21 @@ else
   print_warning "No database at $DEST — creating a new one"
 fi
 
-# --- 2. refuse same-name collisions ---------------------------------------
+# --- 2. same-name collisions ----------------------------------------------
+# A filename must mean one set of bytes across every channel. The same file
+# reaching a channel that already holds it (a fast-ring publish after edge,
+# a re-run, a later promotion) is fine: it is skipped on upload and only the
+# database entry is added. Different bytes under a name the channel already
+# has is the one thing this must never do.
 for f in "${FILES[@]}"; do
-  if grep -qxF "$(basename "$f")" <<<"$listing"; then
-    print_error "Already published, refusing to overwrite: $(basename "$f")"
+  b=$(basename "$f")
+  grep -qxF "$b" <<<"$listing" || continue
+  remote_sum=$(rclone hashsum md5 "$DEST/$b" --s3-no-head 2>/dev/null | awk '{print $1}')
+  local_sum=$(md5sum "$f" | awk '{print $1}')
+  if [[ -n "$remote_sum" && "$remote_sum" == "$local_sum" ]]; then
+    print_info "Already published with identical bytes, adding to the database only: $b"
+  else
+    print_error "Already published with DIFFERENT bytes, refusing to overwrite: $b"
     echo "  Bump pkgrel; published filenames are immutable."
     exit 1
   fi

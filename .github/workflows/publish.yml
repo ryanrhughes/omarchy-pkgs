@@ -1,9 +1,11 @@
 name: Publish merged packages
 
-# On every push to master: for each package directory the push touched, and
-# each channel it is eligible for, find the PR build artifact for exactly
-# that tree (label = <pkg>-<mirror>-<arch>-<treehash>), or build it now when
-# there is none, then publish it incrementally into the channel.
+# On every push to master: for each package directory the push touched and
+# each architecture it supports, find the PR build artifact for exactly that
+# tree (label = <pkg>-<arch>-<treehash>), or build it now when there is
+# none, then publish that one artifact into every channel the package ships
+# to. One build, one file, several databases: a filename means one set of
+# bytes everywhere, and channels are views over a shared pool.
 #
 # Secrets live in the "publish" environment, restricted to master:
 #   GPG_PRIVATE_KEY, GPG_PASSPHRASE   the channel signing key
@@ -50,7 +52,7 @@ jobs:
           matrix=$(printf '%s\n' $names | bin/build-matrix)
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
           echo "count=$(jq '.include | length' <<<"$matrix")" >> "$GITHUB_OUTPUT"
-          jq -r '.include[] | "\(.package) -> \(.mirror)/\(.arch)"' <<<"$matrix"
+          jq -r '.include[] | "\(.package) \(.arch) -> \(.channels)"' <<<"$matrix"
 
   publish:
     needs: changes
@@ -59,9 +61,9 @@ jobs:
     environment: publish
     timeout-minutes: 240
     strategy:
-      # One channel at a time per job is what publish-artifact assumes; the
-      # matrix runs channels in parallel because each is its own database.
-      max-parallel: 3
+      # Jobs are per package per architecture, so two jobs never write the
+      # same channel database at once.
+      max-parallel: 4
       fail-fast: false
       matrix: ${{ fromJson(needs.changes.outputs.matrix) }}
     steps:
@@ -75,7 +77,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           hash=$(git rev-parse HEAD:pkgbuilds/${{ matrix.package }})
-          label="${{ matrix.package }}-${{ matrix.mirror }}-${{ matrix.arch }}-$hash"
+          label="${{ matrix.package }}-${{ matrix.arch }}-$hash"
           echo "label=$label" >> "$GITHUB_OUTPUT"
           # Newest non-expired artifact with that exact label, from any run
           # of the PR workflow in this repository (never a fork's).
@@ -92,7 +94,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: ${{ steps.find.outputs.label }}
-          path: build-output/${{ matrix.mirror }}/${{ matrix.arch }}
+          path: build-output/edge/${{ matrix.arch }}
           # The artifact belongs to the PR workflow's run, not this one.
           run-id: ${{ steps.find.outputs.run_id }}
           github-token: ${{ github.token }}
@@ -101,9 +103,9 @@ jobs:
         if: steps.find.outputs.artifact_id == ''
         env:
           CONTAINER_ENGINE: docker
-        run: bin/build --mirror ${{ matrix.mirror }} --arch ${{ matrix.arch }} --package ${{ matrix.package }}
+        run: bin/build --mirror edge --arch ${{ matrix.arch }} --package ${{ matrix.package }}
 
-      - name: Publish to ${{ matrix.mirror }}/${{ matrix.arch }}
+      - name: Publish to ${{ matrix.channels }} (${{ matrix.arch }})
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
@@ -121,17 +123,22 @@ jobs:
         # same way bin/sign and bin/update-repo already do.
         run: |
           shopt -s nullglob
-          files=(build-output/${{ matrix.mirror }}/${{ matrix.arch }}/*.pkg.tar.zst)
+          files=(build-output/edge/${{ matrix.arch }}/*.pkg.tar.zst)
           (( ${#files[@]} )) || { echo "no package files to publish" >&2; exit 1; }
           docker image inspect omarchy-pkg-builder:latest-x86_64-edge >/dev/null 2>&1 \
             || docker buildx build --load -t omarchy-pkg-builder:latest-x86_64-edge --build-arg MIRROR=edge build
-          docker run --rm \
-            -e GPG_PRIVATE_KEY -e GPG_PASSPHRASE -e OMARCHY_PUBLISH_PREFIX \
-            -e RCLONE_CONFIG_R2_TYPE -e RCLONE_CONFIG_R2_PROVIDER -e RCLONE_CONFIG_R2_ENDPOINT -e RCLONE_CONFIG_R2_NO_CHECK_BUCKET \
-            -e RCLONE_CONFIG_R2_ACCESS_KEY_ID -e RCLONE_CONFIG_R2_SECRET_ACCESS_KEY \
-            -v "$PWD:/w:ro" -w /w \
-            omarchy-pkg-builder:latest-x86_64-edge \
-            bin/publish-artifact --remote R2:omarchy-pkgs --mirror ${{ matrix.mirror }} --arch ${{ matrix.arch }} "${files[@]}"
+          # The same files go into each channel. A channel that already has
+          # a filename keeps its copy (publish-artifact refuses to overwrite),
+          # which is fine because the bytes are identical by construction.
+          for mirror in ${{ matrix.channels }}; do
+            docker run --rm \
+              -e GPG_PRIVATE_KEY -e GPG_PASSPHRASE -e OMARCHY_PUBLISH_PREFIX \
+              -e RCLONE_CONFIG_R2_TYPE -e RCLONE_CONFIG_R2_PROVIDER -e RCLONE_CONFIG_R2_ENDPOINT -e RCLONE_CONFIG_R2_NO_CHECK_BUCKET \
+              -e RCLONE_CONFIG_R2_ACCESS_KEY_ID -e RCLONE_CONFIG_R2_SECRET_ACCESS_KEY \
+              -v "$PWD:/w:ro" -w /w \
+              omarchy-pkg-builder:latest-x86_64-edge \
+              bin/publish-artifact --remote R2:omarchy-pkgs --mirror "$mirror" --arch ${{ matrix.arch }} "${files[@]}"
+          done
 
   result:
     needs: [changes, publish]

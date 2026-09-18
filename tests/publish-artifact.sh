@@ -13,9 +13,9 @@ export GPG_PRIVATE_KEY=$(gpg --batch --armor --export-secret-keys 'Test <t@t>') 
 unset GNUPGHOME
 
 # minimal real packages via makepkg
-mkpkg() { # mkpkg <name> <pkgrel> <arch>
-  local d="$T/src/$1-$2"; mkdir -p "$d"; cd "$d"
-  printf 'pkgname=%s\npkgver=1.0\npkgrel=%s\narch=(%s)\npackage(){ install -Dm644 /dev/null "$pkgdir/usr/share/%s-%s"; }\n' "$1" "$2" "$3" "$1" "$2" > PKGBUILD
+mkpkg() { # mkpkg <name> <pkgrel> <arch> [payload]
+  local d="$T/src/$1-$2${4:+-$4}"; mkdir -p "$d"; cd "$d"
+  printf 'pkgname=%s\npkgver=1.0\npkgrel=%s\narch=(%s)\npackage(){ install -Dm644 /dev/null "$pkgdir/usr/share/%s-%s"; echo "%s" > "$pkgdir/usr/share/%s-%s"; }\n' "$1" "$2" "$3" "$1" "$2" "${4:-payload}" "$1" "$2" > PKGBUILD
   # CARCH so the PKGINFO records the requested arch (--ignorearch would
   # stamp the host's).
   # makepkg refuses to run as root (the CI test container does); build the
@@ -46,7 +46,16 @@ pub "$B1" && [[ "$(entries)" == "alpha-1.0-1/ beta-1.0-1/ " ]] && [[ "$(sha256su
 pub "$A2" && [[ "$(entries)" == "alpha-1.0-2/ beta-1.0-1/ " ]] && [[ -f "$REMOTE/edge/x86_64/$(basename "$A1")" ]] \
   && pass "new pkgrel replaces the db entry, old file remains on remote" || fail "replace entry"
 
-if pub "$A2"; then fail "republishing same filename should refuse"; else grep -q 'refusing to overwrite' "$T/out" && pass "same filename refused" || fail "wrong refusal reason"; fi
+# Same bytes again: allowed, idempotent (this is how a fast-ring artifact
+# reaches rc and stable after edge, and how a re-run recovers).
+pub "$A2" && grep -q 'identical bytes' "$T/out" && [[ "$(entries)" == "alpha-1.0-2/ beta-1.0-1/ " ]] \
+  && pass "identical bytes under an existing name: accepted, db unchanged" || fail "identical republish"
+
+# Different bytes under an existing name: refused. Build alpha-2 again with
+# a different payload (makepkg is reproducible, so the content must change).
+A2b=$(mkpkg alpha 2 any different-payload)
+[[ "$(md5sum < "$A2")" != "$(md5sum < "$A2b")" ]] || { echo "fixture: rebuilt package is byte-identical, cannot test"; exit 1; }
+if pub "$A2b"; then fail "different bytes under same filename should refuse"; else grep -q 'DIFFERENT bytes' "$T/out" && pass "different bytes under an existing name refused" || fail "wrong refusal reason"; fi
 
 if pub "$C1"; then fail "aarch64 package into x86_64 should refuse"; else grep -q 'publishing to x86_64' "$T/out" && pass "wrong-arch package refused" || fail "wrong-arch reason"; fi
 
