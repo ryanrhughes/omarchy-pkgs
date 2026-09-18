@@ -51,6 +51,13 @@ pub "$A2" && [[ "$(entries)" == "alpha-1.0-2/ beta-1.0-1/ " ]] && [[ -f "$REMOTE
 pub "$A2" && grep -q 'identical bytes' "$T/out" && [[ "$(entries)" == "alpha-1.0-2/ beta-1.0-1/ " ]] \
   && pass "identical bytes under an existing name: accepted, db unchanged" || fail "identical republish"
 
+# Orphan repair: a file that reached the remote but whose db entry was lost
+# (a concurrent publish overwrote the db) is fixed by publishing it again.
+( cd "$REMOTE/edge/x86_64" && repo-remove --quiet omarchy.db.tar.zst alpha >/dev/null 2>&1 )
+[[ "$(entries)" == "beta-1.0-1/ " ]] || fail "fixture: could not drop alpha from the db"
+pub "$A2" && [[ "$(entries)" == "alpha-1.0-2/ beta-1.0-1/ " ]] \
+  && pass "orphaned file regains its db entry on republish" || fail "orphan repair"
+
 # Different bytes under an existing name: refused. Build alpha-2 again with
 # a different payload (makepkg is reproducible, so the content must change).
 A2b=$(mkpkg alpha 2 any different-payload)
