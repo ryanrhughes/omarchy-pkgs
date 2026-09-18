@@ -61,6 +61,6 @@ BODY_FILE=$(mktemp); trap 'rm -f "$CALLS_FILE" "$BODY_FILE"' EXIT
 do_api() { if [[ $1 == droplets ]]; then printf '%s' "${*: -1}" >"$BODY_FILE"; echo '{"droplet":{"id":1}}'; else echo '{"droplets":[]}'; fi; }
 gh_api() { echo '{"token":"TOK"}'; }
 create_droplet >/dev/null
-jq -e '.tags == ["omarchy-builder"] and .size == "c-32" and (.user_data | test("--token \"TOK\"")) and (.user_data | test("__") | not)' "$BODY_FILE" >/dev/null \
+jq -e '.tags == ["omarchy-builder"] and .size == "g5-32vcpu-64gb-50gb" and (.user_data | test("--token \"TOK\"")) and (.user_data | test("__") | not)' "$BODY_FILE" >/dev/null \
   && echo "PASS: create body carries tag, size, substituted user-data" \
   || { echo "FAIL: create body"; jq . "$BODY_FILE" | head -20; exit 1; }

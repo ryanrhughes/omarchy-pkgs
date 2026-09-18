@@ -10,7 +10,7 @@ here=$(dirname "$0")
 : "${DIGITALOCEAN_TOKEN:?}" "${GITHUB_TOKEN:?}"
 REPO=${REPO:-omacom/omarchy-pkgs}
 BRANCH=${1:-master}
-REGION=${REGION:-nyc3}
+REGION=${REGION:-ric1}
 NAME=${NAME:-omarchy-controller}
 # Optional DO ssh key ids as a JSON array, e.g. SSH_KEYS='[123]', for reading
 # the journal while bringing the box up. Not needed once it works.

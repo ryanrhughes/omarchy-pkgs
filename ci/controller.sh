@@ -21,8 +21,8 @@ REPO=${REPO:?owner/name}
 : "${DIGITALOCEAN_TOKEN:?}" "${GITHUB_TOKEN:?}"
 LABEL=${LABEL:-omarchy-builder}
 TAG=${TAG:-omarchy-builder}
-REGION=${REGION:-nyc3}
-SIZE=${SIZE:-c-32}
+REGION=${REGION:-ric1}
+SIZE=${SIZE:-g5-32vcpu-64gb-50gb}
 IMAGE=${IMAGE:-ubuntu-24-04-x64}
 MAX_DROPLETS=${MAX_DROPLETS:-4}
 MAX_AGE_MINUTES=${MAX_AGE_MINUTES:-200}
