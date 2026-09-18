@@ -10,11 +10,15 @@
 package_update: true
 packages: [curl, jq, git]
 
+# DO images default disable_root to true, which rewrites any key given to
+# root into a "please log in as another user" stub. Keep root reachable so
+# the journal can be read while the box is being brought up.
+disable_root: false
+ssh_authorized_keys: [__SSH_PUBKEY__]
+
 users:
   - name: controller
     shell: /bin/bash
-  - name: root
-    ssh_authorized_keys: [__SSH_PUBKEY__]
 
 write_files:
   # defer: write after the users module has created the controller group,
