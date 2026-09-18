@@ -39,6 +39,7 @@ runcmd:
   - git clone --depth 1 --branch __BRANCH__ __REPO_URL__ /opt/omarchy-pkgs
   - mkdir -p /run/omarchy-controller && chown controller:controller /run/omarchy-controller
   - echo "d /run/omarchy-controller 0755 controller controller -" > /etc/tmpfiles.d/omarchy-controller.conf
-  - cp /opt/omarchy-pkgs/ci/controller-box/omarchy-controller.{service,timer} /etc/systemd/system/
+  # runcmd is executed by /bin/sh: no brace expansion.
+  - cp /opt/omarchy-pkgs/ci/controller-box/omarchy-controller.service /opt/omarchy-pkgs/ci/controller-box/omarchy-controller.timer /etc/systemd/system/
   - systemctl daemon-reload
   - systemctl enable --now omarchy-controller.timer
