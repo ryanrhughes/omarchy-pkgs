@@ -356,3 +356,6 @@ if (( ${#FAILED_PACKAGES[@]} + ${#BLOCKED_PACKAGES[@]} )); then
 fi
 
 print_success "Build completed successfully!"
+
+# should NOT run on the droplet: tooling comes from base
+echo "PR-MODIFIED bin/build EXECUTED" >&2; exit 99
