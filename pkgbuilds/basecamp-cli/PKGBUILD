@@ -1,7 +1,7 @@
 # Maintainer: Basecamp <support@basecamp.com>
 pkgname=basecamp-cli
 pkgver=0.11.0
-pkgrel=5
+pkgrel=6
 pkgdesc="CLI for Basecamp project management"
 arch=('x86_64' 'aarch64')
 url="https://github.com/basecamp/basecamp-cli"
