@@ -47,4 +47,5 @@ jobs:
               ./bin/omarchy-release self-test
               ./tests/partial-release.sh
               ./tests/published-build-plan.sh
+              ./tests/controller.sh
             '
