@@ -5,17 +5,18 @@
 # package once. The eligibility rules are the ones the release host uses
 # (package_builds_for_mirror), so CI and the host can never disagree.
 #
-# Usage: build-matrix [--arch <arch>] <package>...
-#   Reads package names on stdin when none are given.
-#   Output: {"include":[{"package":"x","mirror":"edge"},...]}
+# Usage: build-matrix [--arch <arch>|all] <package>...
+#   Reads package names on stdin when none are given. With no --arch, every
+#   architecture in CI_ARCHES (default "x86_64 aarch64") the package supports.
+#   Output: {"include":[{"package":"x","mirror":"edge","arch":"x86_64"},...]}
 set -euo pipefail
 BUILD_ROOT=$(realpath "${BASH_SOURCE[0]%/*}/..")
 source "$BUILD_ROOT/helpers/paths.sh"
 source "$BUILD_ROOT/helpers/package-metadata.sh"
 
-ARCH_ARG=${ARCH:-x86_64}
-if [[ "${1:-}" == --arch ]]; then ARCH_ARG=$2; shift 2; fi
-require_valid_arch "$ARCH_ARG"
+ARCHES=${CI_ARCHES:-x86_64 aarch64}
+if [[ "${1:-}" == --arch ]]; then [[ $2 == all ]] || ARCHES=$2; shift 2; fi
+for a in $ARCHES; do require_valid_arch "$a"; done
 
 if (( $# )); then names=("$@"); else mapfile -t names; fi
 
@@ -24,13 +25,15 @@ for name in "${names[@]}"; do
   [[ -n "$name" ]] || continue
   pkgdir="$PKGBUILDS_DIR/$name"
   [[ -d "$pkgdir" ]] || continue
-  package_supports_arch "$pkgdir" "$ARCH_ARG" || continue
-  for mirror in $VALID_MIRRORS; do
-    # skip_build packages still build on their own PR (explicit --package
-    # semantics); the host's unscoped runs are what skip them.
-    if package_builds_for_mirror "$pkgdir" "$mirror"; then
-      entries+=("$(jq -nc --arg p "$name" --arg m "$mirror" --arg a "$ARCH_ARG" '{package:$p, mirror:$m, arch:$a}')")
-    fi
+  for arch in $ARCHES; do
+    package_supports_arch "$pkgdir" "$arch" || continue
+    for mirror in $VALID_MIRRORS; do
+      # skip_build packages still build on their own PR (explicit --package
+      # semantics); the host's unscoped runs are what skip them.
+      if package_builds_for_mirror "$pkgdir" "$mirror"; then
+        entries+=("$(jq -nc --arg p "$name" --arg m "$mirror" --arg a "$arch" '{package:$p, mirror:$m, arch:$a}')")
+      fi
+    done
   done
 done
 
