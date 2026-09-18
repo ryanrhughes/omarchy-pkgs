@@ -1,12 +1,11 @@
 name: Build changed packages
 
-# Spike: build every package directory a PR touches, one job per package, on
-# the self-hosted droplet pool. Artifacts are unsigned and are not published.
+# Build every package directory a PR touches, one job per package per arch, on
+# the self-hosted droplet pool. Artifacts are unsigned; publish.yml signs and
+# publishes them on merge.
 #
-# NOT yet enforced here (required before this runs on the real repo):
-#   - tooling from base: checkout master's bin/helpers/build and overlay only
-#     the PR's pkgbuilds/<name> directories. The vouch gate limits who can
-#     change tooling in a PR, not what a trusted author's PR can run.
+# Tooling runs from the base branch; a PR supplies only pkgbuilds/. The
+# vouch gate limits who may spend compute; this limits what their PR can run.
 
 # No paths filter: `result` is the required status check, so it has to be
 # reported on every PR. A PR that touches no package directory gets an empty
@@ -38,10 +37,17 @@ jobs:
       count: ${{ steps.gate.outputs.count }}
       trusted: ${{ steps.gate.outputs.trusted }}
     steps:
+      # Same rule as the build job: bin/build-matrix comes from base, the
+      # package directories from the PR head.
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
+      - if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --depth=1 origin "${{ github.event.pull_request.head.sha }}"
+          git checkout "${{ github.event.pull_request.head.sha }}" -- pkgbuilds/
       - id: vouch
         if: github.event_name == 'pull_request'
         uses: mitchellh/vouch/action/check-user@f23dbb5e745334f97414ec70463ce7301071a661 # v1
@@ -58,7 +64,7 @@ jobs:
           if [[ -n "${{ github.event.inputs.packages }}" ]]; then
             names="${{ github.event.inputs.packages }}"
           else
-            names=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" -- pkgbuilds \
+            names=$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}" -- pkgbuilds \
               | awk -F/ '$1=="pkgbuilds" && NF>2 {print $2}' | sort -u)
           fi
           matrix=$(printf '%s\n' $names | bin/build-matrix)
@@ -101,9 +107,24 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.changes.outputs.matrix) }}
     steps:
+      # Tooling from base: everything that executes on this droplet's host
+      # (bin/, helpers/, build/) comes from the base branch. Only the PR's
+      # package directories are overlaid. A PR can therefore change what
+      # gets built, never how the runner builds it. A PR that changes both
+      # tooling and a package builds the package with the OLD tooling; land
+      # the tooling first. workflow_dispatch has no PR and runs as checked out.
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
           persist-credentials: false
+      - name: Overlay the PR's package directories onto base tooling
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "${{ github.event.pull_request.head.sha }}"
+          git checkout "${{ github.event.pull_request.head.sha }}" -- pkgbuilds/
+          echo "tooling: $(git rev-parse --short HEAD) (base)  packages: ${{ github.event.pull_request.head.sha }} (PR head)"
+          git status --short | head
       - name: Build ${{ matrix.package }} (${{ matrix.arch }}, ships to ${{ matrix.channels }})
         env:
           CONTAINER_ENGINE: docker
@@ -111,9 +132,11 @@ jobs:
       # The artifact label carries the package directory's git tree hash so
       # the publish step can find the build for exactly the tree that merged.
       # The package file inside keeps makepkg's standard name untouched.
+      # The artifact label uses the PR head's tree for this package: that is
+      # the tree that merges, and what publish looks up.
       - name: Tree hash
         id: tree
-        run: echo "hash=$(git rev-parse HEAD:pkgbuilds/${{ matrix.package }})" >> "$GITHUB_OUTPUT"
+        run: echo "hash=$(git rev-parse "${{ github.event.pull_request.head.sha || github.sha }}:pkgbuilds/${{ matrix.package }}")" >> "$GITHUB_OUTPUT"
       - name: Upload artifact
         if: always()
         uses: actions/upload-artifact@v4
