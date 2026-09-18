@@ -23,9 +23,6 @@ package_update: true
 packages:
   - docker.io
   - docker-buildx
-  # aarch64 builds run under user-mode emulation: DO has no arm droplets.
-  - qemu-user-static
-  - binfmt-support
   - git
   - curl
   - jq
@@ -69,5 +66,11 @@ runcmd:
   # can read the logs of a builder that never registers.
   - chage -d "$(date +%F)" -M -1 root
   - systemctl enable --now docker
+  # aarch64 builds run under user-mode emulation (DO has no arm droplets).
+  # Register QEMU with the F and C flags via the multiarch image, exactly as
+  # helpers/docker-helpers.sh setup_qemu does: Ubuntu's qemu-user-static
+  # package registers without C, so sudo inside the emulated container fails
+  # with "effective uid is not 0". Best-effort: an x86-only job never needs it.
+  - docker run --rm --privileged docker.io/multiarch/qemu-user-static --reset -p yes --credential yes || true
   - chown -R runner:runner /home/runner
   - sudo -u runner /home/runner/start.sh > /home/runner/runner.log 2>&1
