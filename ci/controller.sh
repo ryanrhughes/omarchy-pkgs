@@ -28,8 +28,9 @@ MAX_DROPLETS=${MAX_DROPLETS:-4}
 MAX_AGE_MINUTES=${MAX_AGE_MINUTES:-200}
 RUNNER_VERSION=${RUNNER_VERSION:-2.337.0}
 CLOUD_INIT=${CLOUD_INIT:-$(dirname "$0")/runner-cloud-init.yaml}
-# Optional DO ssh key ids (JSON array, e.g. '[123]') for debugging a runner.
-SSH_KEYS=${SSH_KEYS:-[]}
+# Operator public keys authorized on every builder (JSON array of strings).
+# The box's env file carries them; empty means no root login.
+SSH_KEYS_JSON=${SSH_KEYS_JSON:-[]}
 LOCK=${LOCK:-/tmp/omarchy-controller.lock}
 
 log() { echo "$(date '+%F %T') $*"; }
@@ -87,11 +88,12 @@ create_droplet() {
   local token userdata name body
   token=$(gh_api "repos/$REPO/actions/runners/registration-token" -X POST | jq -r .token)
   userdata=$(sed -e "s|__REPO__|$REPO|g" -e "s|__RUNNER_TOKEN__|$token|g" \
-                 -e "s|__RUNNER_LABELS__|$LABEL|g" -e "s|__RUNNER_VERSION__|$RUNNER_VERSION|g" "$CLOUD_INIT")
+                 -e "s|__RUNNER_LABELS__|$LABEL|g" -e "s|__RUNNER_VERSION__|$RUNNER_VERSION|g" \
+                 -e "s|__SSH_KEYS_JSON__|$SSH_KEYS_JSON|" "$CLOUD_INIT")
   name="$TAG-$(date +%s)-$RANDOM"
   body=$(jq -n --arg name "$name" --arg region "$REGION" --arg size "$SIZE" --arg image "$IMAGE" \
-    --arg tag "$TAG" --arg ud "$userdata" --argjson keys "$SSH_KEYS" \
-    '{name:$name, region:$region, size:$size, image:$image, tags:[$tag], user_data:$ud, ssh_keys:$keys, monitoring:false}')
+    --arg tag "$TAG" --arg ud "$userdata" \
+    '{name:$name, region:$region, size:$size, image:$image, tags:[$tag], user_data:$ud, monitoring:false}')
   log "creating $name ($SIZE)"
   do_api droplets -X POST -d "$body" | jq -r '"created droplet \(.droplet.id)"'
 }

@@ -12,6 +12,13 @@
 #   __RUNNER_LABELS__   e.g. omarchy-builder
 #   __RUNNER_VERSION__  e.g. 2.329.0
 
+# Operators can reach a builder by key while it lives; it powers off after
+# one job anyway. Keys are substituted by the controller (__SSH_KEYS_JSON__).
+disable_root: false
+chpasswd:
+  expire: false
+ssh_authorized_keys: __SSH_KEYS_JSON__
+
 package_update: true
 packages:
   - docker.io

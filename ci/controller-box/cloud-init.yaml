@@ -6,15 +6,18 @@
 #   __REPO_URL__   https://github.com/omacom/omarchy-pkgs.git
 #   __BRANCH__     branch carrying ci/ (master once merged)
 #   __ENV_B64__    base64 of a filled-in controller.env.example
-#   __SSH_PUBKEY__ optional public key for root, for reading the journal
+#   __SSH_KEYS_JSON__ JSON array of public keys authorized for root
 package_update: true
 packages: [curl, jq, git]
 
-# DO images default disable_root to true, which rewrites any key given to
-# root into a "please log in as another user" stub. Keep root reachable so
-# the journal can be read while the box is being brought up.
+# Root stays reachable by key so the journal can be read. Two things stand
+# in the way on DO images: disable_root rewrites root's keys into a stub, and
+# with no account ssh key attached DO expires root's password, which makes
+# sshd refuse every non-interactive session with "password change required".
 disable_root: false
-ssh_authorized_keys: [__SSH_PUBKEY__]
+chpasswd:
+  expire: false
+ssh_authorized_keys: __SSH_KEYS_JSON__
 
 users:
   - name: controller
@@ -31,6 +34,7 @@ write_files:
     content: __ENV_B64__
 
 runcmd:
+  - chage -d "$(date +%F)" -M -1 root
   - chown root:controller /etc/omarchy-controller.env && chmod 0640 /etc/omarchy-controller.env
   - git clone --depth 1 --branch __BRANCH__ __REPO_URL__ /opt/omarchy-pkgs
   - mkdir -p /run/omarchy-controller && chown controller:controller /run/omarchy-controller
