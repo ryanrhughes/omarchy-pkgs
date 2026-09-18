@@ -6,12 +6,15 @@
 #   __REPO_URL__   https://github.com/omacom/omarchy-pkgs.git
 #   __BRANCH__     branch carrying ci/ (master once merged)
 #   __ENV_B64__    base64 of a filled-in controller.env.example
+#   __SSH_PUBKEY__ optional public key for root, for reading the journal
 package_update: true
 packages: [curl, jq, git]
 
 users:
   - name: controller
     shell: /bin/bash
+  - name: root
+    ssh_authorized_keys: [__SSH_PUBKEY__]
 
 write_files:
   # defer: write after the users module has created the controller group,
