@@ -105,7 +105,7 @@ jobs:
           CONTAINER_ENGINE: docker
         run: bin/build --mirror edge --arch ${{ matrix.arch }} --package ${{ matrix.package }}
 
-      - name: Publish to ${{ matrix.channels }} (${{ matrix.arch }})
+      - name: Publish to ${{ matrix.channels }} (${{ matrix.publish_arches }})
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
@@ -131,13 +131,15 @@ jobs:
           # a filename keeps its copy (publish-artifact refuses to overwrite),
           # which is fine because the bytes are identical by construction.
           for mirror in ${{ matrix.channels }}; do
-            docker run --rm \
-              -e GPG_PRIVATE_KEY -e GPG_PASSPHRASE -e OMARCHY_PUBLISH_PREFIX \
-              -e RCLONE_CONFIG_R2_TYPE -e RCLONE_CONFIG_R2_PROVIDER -e RCLONE_CONFIG_R2_ENDPOINT -e RCLONE_CONFIG_R2_NO_CHECK_BUCKET \
-              -e RCLONE_CONFIG_R2_ACCESS_KEY_ID -e RCLONE_CONFIG_R2_SECRET_ACCESS_KEY \
-              -v "$PWD:/w:ro" -w /w \
-              omarchy-pkg-builder:latest-x86_64-edge \
-              bin/publish-artifact --remote R2:omarchy-pkgs --mirror "$mirror" --arch ${{ matrix.arch }} "${files[@]}"
+            for arch in ${{ matrix.publish_arches }}; do
+              docker run --rm \
+                -e GPG_PRIVATE_KEY -e GPG_PASSPHRASE -e OMARCHY_PUBLISH_PREFIX \
+                -e RCLONE_CONFIG_R2_TYPE -e RCLONE_CONFIG_R2_PROVIDER -e RCLONE_CONFIG_R2_ENDPOINT -e RCLONE_CONFIG_R2_NO_CHECK_BUCKET \
+                -e RCLONE_CONFIG_R2_ACCESS_KEY_ID -e RCLONE_CONFIG_R2_SECRET_ACCESS_KEY \
+                -v "$PWD:/w:ro" -w /w \
+                omarchy-pkg-builder:latest-x86_64-edge \
+                bin/publish-artifact --remote R2:omarchy-pkgs --mirror "$mirror" --arch "$arch" "${files[@]}"
+            done
           done
 
   result:
