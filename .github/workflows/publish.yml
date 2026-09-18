@@ -79,8 +79,9 @@ jobs:
           echo "label=$label" >> "$GITHUB_OUTPUT"
           # Newest non-expired artifact with that exact label, from any run
           # of the PR workflow in this repository (never a fork's).
-          id=$(gh api "repos/${{ github.repository }}/actions/artifacts?name=$label&per_page=5" \
-            --jq '[.artifacts[] | select(.expired|not)] | sort_by(.created_at) | last | .id // empty')
+          id=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts?name=$label&per_page=5" \
+            | jq -r '[.artifacts[] | select(.expired|not)] | sort_by(.created_at) | last | .id // empty')
           echo "artifact_id=$id" >> "$GITHUB_OUTPUT"
           echo "${id:+found artifact $id for }$label${id:+ }${id:-: no artifact, will build}"
 
