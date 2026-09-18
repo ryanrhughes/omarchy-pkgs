@@ -70,3 +70,16 @@ jobs:
           path: build-output/edge/x86_64/*.pkg.tar.zst
           if-no-files-found: error
           retention-days: 7
+
+  # The one required status check. Matrix job names carry the package name, so
+  # they cannot be listed in branch protection; this job's name is stable and
+  # it fails if any package failed. It also runs (and passes) when no package
+  # changed, so tooling-only PRs are not stuck waiting for a status.
+  result:
+    needs: [changes, build]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "build result: ${{ needs.build.result }}"
+          [[ "${{ needs.build.result }}" == "success" || "${{ needs.build.result }}" == "skipped" ]]
