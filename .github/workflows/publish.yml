@@ -54,62 +54,61 @@ jobs:
           echo "count=$(jq '.include | length' <<<"$matrix")" >> "$GITHUB_OUTPUT"
           jq -r '.include[] | "\(.package) \(.arch) -> \(.channels)"' <<<"$matrix"
 
+  # One job for the whole merge. It collects every PR artifact for the
+  # merged tree (building only what has none), then walks each channel and
+  # architecture slot exactly once: pull that database, add every package
+  # that belongs in it, upload. Six slots, six round trips, however many
+  # packages the merge carried. One process is the only writer, so there
+  # is no race between packages; the run-level concurrency group above
+  # keeps one merge from overlapping the next.
   publish:
     needs: changes
     if: needs.changes.outputs.count != '0'
     runs-on: [self-hosted, omarchy-builder]
     environment: publish
     timeout-minutes: 240
-    strategy:
-      # One job at a time. Each job pulls a channel database, adds its
-      # package, and uploads the whole file back; two jobs publishing into
-      # the same channel concurrently would each overwrite the other's entry
-      # (seen: a three-package merge lost two entries). Builds already ran
-      # on the PR, so serial publishing costs a minute per package, not a
-      # build.
-      max-parallel: 1
-      fail-fast: false
-      matrix: ${{ fromJson(needs.changes.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
 
-      - name: Find the PR build for this tree
-        id: find
+      # Every matrix entry, as a file the shell steps can loop over:
+      # package arch channels publish_arches
+      - name: Plan
+        run: |
+          jq -r '.include[] | "\(.package) \(.arch) \(.channels|gsub(" ";",")) \(.publish_arches|gsub(" ";","))"' \
+            <<'EOF_MATRIX' > plan.txt
+          ${{ needs.changes.outputs.matrix }}
+          EOF_MATRIX
+          cat plan.txt
+
+      # Fetch each package's PR artifact into build-output/edge/<arch>/, or
+      # build it when no artifact exists for exactly this tree.
+      - name: Collect artifacts
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          hash=$(git rev-parse HEAD:pkgbuilds/${{ matrix.package }})
-          label="${{ matrix.package }}-${{ matrix.arch }}-$hash"
-          echo "label=$label" >> "$GITHUB_OUTPUT"
-          # Newest non-expired artifact with that exact label, from any run
-          # of the PR workflow in this repository (never a fork's).
-          id=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts?name=$label&per_page=5" \
-            | jq -r '[.artifacts[] | select(.expired|not)] | sort_by(.created_at) | last | "\(.id // "") \(.workflow_run.id // "")"')
-          run_id=${id#* }; id=${id%% *}
-          echo "artifact_id=$id" >> "$GITHUB_OUTPUT"
-          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
-          echo "${id:+found artifact $id for }$label${id:+ }${id:-: no artifact, will build}"
-
-      - name: Download the PR build
-        if: steps.find.outputs.artifact_id != ''
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ steps.find.outputs.label }}
-          path: build-output/edge/${{ matrix.arch }}
-          # The artifact belongs to the PR workflow's run, not this one.
-          run-id: ${{ steps.find.outputs.run_id }}
-          github-token: ${{ github.token }}
-
-      - name: Build (no PR artifact for this tree)
-        if: steps.find.outputs.artifact_id == ''
-        env:
           CONTAINER_ENGINE: docker
-        run: bin/build --mirror edge --arch ${{ matrix.arch }} --package ${{ matrix.package }}
+        run: |
+          set -euo pipefail
+          while read -r package arch channels publish_arches; do
+            hash=$(git rev-parse "HEAD:pkgbuilds/$package")
+            label="$package-$arch-$hash"
+            found=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${{ github.repository }}/actions/artifacts?name=$label&per_page=5" \
+              | jq -r '[.artifacts[] | select(.expired|not)] | sort_by(.created_at) | last | .archive_download_url // empty')
+            mkdir -p "build-output/edge/$arch"
+            if [[ -n "$found" ]]; then
+              echo "==> $label: PR artifact"
+              curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -o /tmp/artifact.zip "$found"
+              unzip -oq /tmp/artifact.zip -d "build-output/edge/$arch"
+            else
+              echo "==> $label: no artifact for this tree, building"
+              OMARCHY_KEEP_BUILD_WORKSPACE=1 bin/build --mirror edge --arch "$arch" --package "$package"
+            fi
+          done < plan.txt
+          ls -1 build-output/edge/*/*.pkg.tar.zst
 
-      - name: Publish to ${{ matrix.channels }} (${{ matrix.publish_arches }})
+      - name: Publish
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
@@ -123,26 +122,50 @@ jobs:
           RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
           OMARCHY_PUBLISH_PREFIX: ${{ vars.OMARCHY_PUBLISH_PREFIX }}
         # repo-add, gpg and bsdtar are Arch tools; run the publish inside the
-        # builder image (host-native, edge) with the workspace mounted, the
-        # same way bin/sign and bin/update-repo already do.
+        # builder image (host-native, edge) with the workspace mounted.
         run: |
-          shopt -s nullglob
-          files=(build-output/edge/${{ matrix.arch }}/*.pkg.tar.zst)
-          (( ${#files[@]} )) || { echo "no package files to publish" >&2; exit 1; }
+          set -euo pipefail
           docker image inspect omarchy-pkg-builder:latest-x86_64-edge >/dev/null 2>&1 \
             || docker buildx build --load -t omarchy-pkg-builder:latest-x86_64-edge --build-arg MIRROR=edge build
-          # The same files go into each channel. A channel that already has
-          # a filename keeps its copy (publish-artifact refuses to overwrite),
-          # which is fine because the bytes are identical by construction.
-          for mirror in ${{ matrix.channels }}; do
-            for arch in ${{ matrix.publish_arches }}; do
+
+          # Group the merge's files by the (channel, architecture) slot each
+          # belongs to. A package's files live under build-output/edge/<built
+          # arch>/ and are named <pkgname>-<ver>-<arch|any>.pkg.tar.zst; a
+          # split package's outputs share the pkgbase's directory, so match
+          # on the artifact list rather than the name.
+          # pkgbase is read inside the builder image: the Ubuntu host has no
+          # bsdtar. One container call maps every file to its pkgbase.
+          docker run --rm -v "$PWD:/w:ro" -w /w omarchy-pkg-builder:latest-x86_64-edge bash -c '
+            for f in build-output/edge/*/*.pkg.tar.zst; do
+              printf "%s %s\n" "$f" "$(bsdtar -xOf "$f" .PKGINFO | awk -F" = " "\$1==\"pkgbase\"{print \$2}")"
+            done' > pkgbase.txt
+          declare -A slot_files=()
+          while read -r package arch channels publish_arches; do
+            for f in build-output/edge/"$arch"/*.pkg.tar.zst; do
+              # Only files this package produced (its PKGINFO pkgbase).
+              [[ $(awk -v f="$f" '$1==f{print $2}' pkgbase.txt) == "$package" ]] || continue
+              for mirror in ${channels//,/ }; do
+                for parch in ${publish_arches//,/ }; do
+                  slot_files["$mirror/$parch"]+="$f "
+                done
+              done
+            done
+          done < plan.txt
+
+          # Deterministic slot order: edge before rc before stable, x86_64
+          # before aarch64, so a failure leaves the earlier rings consistent.
+          for mirror in edge rc stable; do
+            for parch in x86_64 aarch64; do
+              files=${slot_files["$mirror/$parch"]:-}
+              [[ -n "$files" ]] || continue
+              echo "==> $mirror/$parch: $files"
               docker run --rm \
                 -e GPG_PRIVATE_KEY -e GPG_PASSPHRASE -e OMARCHY_PUBLISH_PREFIX \
                 -e RCLONE_CONFIG_R2_TYPE -e RCLONE_CONFIG_R2_PROVIDER -e RCLONE_CONFIG_R2_ENDPOINT -e RCLONE_CONFIG_R2_NO_CHECK_BUCKET \
                 -e RCLONE_CONFIG_R2_ACCESS_KEY_ID -e RCLONE_CONFIG_R2_SECRET_ACCESS_KEY \
                 -v "$PWD:/w:ro" -w /w \
                 omarchy-pkg-builder:latest-x86_64-edge \
-                bin/publish-artifact --remote R2:omarchy-pkgs --mirror "$mirror" --arch "$arch" "${files[@]}"
+                bin/publish-artifact --remote R2:omarchy-pkgs --mirror "$mirror" --arch "$parch" $files
             done
           done
 
