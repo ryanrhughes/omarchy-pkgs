@@ -3,7 +3,7 @@
 # Needs repo-add, gpg, rclone, bsdtar (run in the Arch builder/test container).
 set -euo pipefail
 ROOT=$(realpath "${BASH_SOURCE[0]%/*}/..")
-T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+T=$(mktemp -d); chmod 755 "$T"; trap 'rm -rf "$T"' EXIT
 REMOTE="$T/r2"; mkdir -p "$REMOTE"
 
 # throwaway signing key
@@ -22,7 +22,8 @@ mkpkg() { # mkpkg <name> <pkgrel> <arch>
   # fixture as an unprivileged user in that case.
   if (( EUID == 0 )); then
     id -u fixture >/dev/null 2>&1 || useradd -m fixture
-    chown -R fixture "$d"; runuser -u fixture -- env CARCH=$3 makepkg -f --nodeps --ignorearch >/dev/null 2>&1
+    chmod 755 "$T/src"; chown -R fixture "$d"
+    runuser -u fixture -- env CARCH=$3 makepkg -f --nodeps --ignorearch >/dev/null 2>&1
   else
     CARCH=$3 makepkg -f --nodeps --ignorearch >/dev/null 2>&1
   fi

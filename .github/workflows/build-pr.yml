@@ -8,10 +8,11 @@ name: Build changed packages
 #     the PR's pkgbuilds/<name> directories
 #   - fork approval setting on the repository
 
+# No paths filter: `result` is the required status check, so it has to be
+# reported on every PR. A PR that touches no package directory gets an empty
+# matrix and a passing result in seconds.
 on:
   pull_request:
-    paths:
-      - "pkgbuilds/**"
   workflow_dispatch:
     inputs:
       packages:
