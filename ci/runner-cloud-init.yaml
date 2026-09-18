@@ -61,6 +61,10 @@ write_files:
       sudo poweroff
 
 runcmd:
+  # With no account ssh key attached, DO expires root's password, and sshd
+  # then refuses every non-interactive session. Clear it first so operators
+  # can read the logs of a builder that never registers.
+  - chage -d "$(date +%F)" -M -1 root
   - systemctl enable --now docker
   - chown -R runner:runner /home/runner
   - sudo -u runner /home/runner/start.sh > /home/runner/runner.log 2>&1
