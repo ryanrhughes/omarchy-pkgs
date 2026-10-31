@@ -2,7 +2,7 @@
 
 _pkgbase=yt6801
 pkgname=yt6801-dkms
-pkgver=1.0.34
+pkgver=1.0.35
 pkgrel=1
 pkgdesc="Kernel module for Motorcomm YT6801 ethernet controller (DKMS)"
 arch=('x86_64')
@@ -11,7 +11,7 @@ license=('GPL-2.0-or-later')
 depends=('dkms')
 source=(${_pkgbase}-${pkgver}.zip::'https://www.motor-comm.com/Cn/Skippower/downloadFile.html?id=1817'
         'patch.diff')
-sha256sums=('877e6953fc6eb47232a74e47b0daf33de0e7f9e9a395d3bc10d500d3c4150af8' '597cbcefe2c3f426a20b089b1a24f7bfcaffe81bdfe1bd2c789c9228b3b5708e')
+sha256sums=('b51e80103cd26c92a35f134814305083bd9074b15f27de7bff1eacbb1b123412' '597cbcefe2c3f426a20b089b1a24f7bfcaffe81bdfe1bd2c789c9228b3b5708e')
 
 prepare() {
   cd ${srcdir}
