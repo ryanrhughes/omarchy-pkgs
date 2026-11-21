@@ -11,8 +11,8 @@ pkgname=(
   'aspnet-targeting-pack-bin'
  )
 # Version the split family by SDK release; dependencies expose runtime versions.
-pkgver=10.0.401
-_runtimever=10.0.12
+pkgver=10.0.404
+_runtimever=10.0.15
 _sdkver=$pkgver
 _short_ver=10.0
 pkgrel=1
@@ -25,9 +25,9 @@ source_armv7h=("https://builds.dotnet.microsoft.com/dotnet/Sdk/${_sdkver}/dotnet
 source_aarch64=("https://builds.dotnet.microsoft.com/dotnet/Sdk/${_sdkver}/dotnet-sdk-${_sdkver}-linux-arm64.tar.gz")
 source_x86_64=("https://builds.dotnet.microsoft.com/dotnet/Sdk/${_sdkver}/dotnet-sdk-${_sdkver}-linux-x64.tar.gz")
 sha512sums=('768151c7179fb6a126b3de9cae01e363e8894f6fab384b1e2c5066c2adca4578638983b1b62aea10dd18045e6d6e8f8ea13280481134de94f004a118919b2c06')
-sha512sums_armv7h=('94a8a52862ca9f0de1075a468d6e4e307a1d4463098a9e8266e66939709a812b0126e212cce7e8c6feae6b078d86c8b77e088814a0e32531edb0da0a1ce90c11')
-sha512sums_aarch64=('58ace73ced6b4360754689a686bdfb8a317f4da6cb8bb416dbc7d0ba9f47e43e3c09f5eb1f1a1cfaacbd10df9558da4882bf2a5e195d6ab56a02c1f9f76102ed')
-sha512sums_x86_64=('51c8b999af9e8dd9998c9edc5944e19a90788862068acd38694e098889054ce8c23d4f0c5cccfa16bf187d044562359e5ee69a9f8ad0bbe913ba90311fbce25b')
+sha512sums_armv7h=('8842c932018ecd242a27128183a89f9729671c07fd3b5a0ea6a1149289abfd110572a5a488ebfa4da6b9b6212ba94dc085ac7c606dd4e7d504b8a4a6c54cf741')
+sha512sums_aarch64=('3533a3869da219cac45c567aadac3d8e96cdf1c6a04fe1c1d5fdeefea5d45af8424488f0144730d11b4a751f7ad546fb11e4c2b2725cd8401efee726711f8f11')
+sha512sums_x86_64=('577d0eb17fec33d029104c5c63a1ab0accc3e28776274abef2218dbac5af18d2109b5406d26b31d76f5c245215e3ba0926a94c20246c672c41847c9e1eb1dc50')
 
 # Keep each split package's notices usable when installed independently.
 _install_license() {
